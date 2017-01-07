@@ -16,7 +16,7 @@
 // GNU General Public License for more details.
 //
 // You should have received a copy of the GNU General Public License
-// along with Foobar.  If not, see <http://www.gnu.org/licenses/>.
+// along with SmartThings-Cast.  If not, see <http://www.gnu.org/licenses/>.
 
 'use strict';
 
@@ -39,7 +39,7 @@ function connectAndPlay(options) {
 	    console.log('app "%s" launched, loading media %s ...', player.session.displayName, options.media.contentId);
 	    
 	    player.load(options.media, { autoplay: true }, function (err, status) {
-		console.log('media loaded playerState=%s', status.playerState);
+		console.log('media loaded err=%s status=%s', err, JSON.stringify(status));
 		client.close();
 	    });
 	});
