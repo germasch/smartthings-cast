@@ -1,0 +1,26 @@
+{
+  "name": "smartthings-cast",
+  "description": "provides a REST endpoint for SmartThings to call that will initiate playback on ChromeCast / GoogleCast device",
+  "version": "0.0.1",
+  "scripts": {
+    "start": "node app.js",
+    "monitor": "nodemon app.js"
+  },
+  "author": "Kai Germaschewski",
+  "keywords": [
+    "smartthings",
+    "chromecast",
+    "googlecast",
+    "google home"
+  ],
+  "license": "GPL-3.0",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/germasch/smartthings-cast.git"
+  },
+  "dependencies": {
+    "castv2-client": "^1.1.2",
+    "express": "^4.13.4",
+    "body-parser": "^1.15.2"
+  }
+}
