@@ -77,7 +77,7 @@ app.post('/play', function (req, res) {
     options.host = body.host;
 
     if (body.port) {
-	options.port = port;
+	options.port = body.port;
     }
 
     if (!body.media) {
