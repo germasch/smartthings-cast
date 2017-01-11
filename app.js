@@ -26,7 +26,7 @@ var DefaultMediaReceiver = require('castv2-client').DefaultMediaReceiver;
 
 // Google Cast
 
-function connectAndPlay(options, res) {
+function connectAndPlayMedia(options, res) {
     let client = new Client();
     
     client.connect(options, function () {
@@ -69,12 +69,77 @@ function connectAndStop(options, res) {
 	    console.log('getSessions err %s sessions %s', err, JSON.stringify(sessions, null, 4));
 	    if (!sessions.length) return res.status(204).send('No app running');
 	    let session = sessions[0]
-	    client.join(session, Application, function (err, p) {
+	    // FIXME, DefaultMediaReceiver might be wrong, but really, we're only using the pass-through
+	    // to MediaController, so we're probably fine
+	    client.join(session, DefaultMediaReceiver, function (err, p) {
 		console.log("join err %s p %s", err, p);
 		if (err) return res.status(400).send(err);
+		p.media.currentSession = session;
 		client.stop(p, function (err, result) {
 		    console.log("stop err %s result %s", err, result);
 		    res.send("Stopped.");
+		});
+	    });
+	});
+    });
+    
+    client.on('error', function (err) {
+	console.log('Error: %s', err.message);
+	client.close();
+	res.status(400).send(err.essage)
+    });
+}
+
+function connectAndPause(options, res) {
+    let client = new Client();
+    
+    client.connect(options, function () {
+	console.log('client.connect succeeded');
+
+	client.getSessions(function (err, sessions) {
+	    console.log('getSessions err %s sessions %s', err, JSON.stringify(sessions, null, 4));
+	    if (!sessions.length) return res.status(400).send('No app running');
+	    let session = sessions[0]
+	    client.join(session, DefaultMediaReceiver, function (err, p) {
+		console.log("join err %s p %s", err, p);
+		if (err) return res.status(400).send(err);
+		p.getStatus(function(err, result) {
+		    console.log("status err %s result %s", err, JSON.stringify(result));
+		    p.pause(function (err, result) {
+			console.log("pause err %s result %s", err, JSON.stringify(result));
+			res.send(result);
+		    });
+		});
+	    });
+	});
+    });
+    
+    client.on('error', function (err) {
+	console.log('Error: %s', err.message);
+	client.close();
+	res.status(400).send(err.essage)
+    });
+}
+
+function connectAndPlay(options, res) {
+    let client = new Client();
+    
+    client.connect(options, function () {
+	console.log('client.connect succeeded');
+
+	client.getSessions(function (err, sessions) {
+	    console.log('getSessions err %s sessions %s', err, JSON.stringify(sessions, null, 4));
+	    if (!sessions.length) return res.status(400).send('No app running');
+	    let session = sessions[0]
+	    client.join(session, DefaultMediaReceiver, function (err, p) {
+		console.log("join err %s p %s", err, p);
+		if (err) return res.status(400).send(err);
+		p.getStatus(function(err, result) {
+		    console.log("status err %s result %s", err, JSON.stringify(result));
+		    p.play(function (err, result) {
+			console.log("play err %s result %s", err, JSON.stringify(result));
+			res.send(result);
+		    });
 		});
 	    });
 	});
@@ -121,7 +186,7 @@ function getOptions(req, res) {
     return options
 }
 
-app.post('/play', function (req, res) {
+app.post('/playMedia', function (req, res) {
     let options = getOptions(req, res);
     if (!options) return;
 
@@ -141,6 +206,20 @@ app.post('/stop', function (req, res) {
     if (!options) return;
 
     connectAndStop(options, res);
+});
+
+app.post('/pause', function (req, res) {
+    let options = getOptions(req, res);
+    if (!options) return;
+
+    connectAndPause(options, res);
+});
+
+app.post('/play', function (req, res) {
+    let options = getOptions(req, res);
+    if (!options) return;
+
+    connectAndPlay(options, res);
 });
 
 if (module === require.main) {
