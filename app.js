@@ -105,6 +105,7 @@ function connectAndPause(options, res) {
 		if (err) return res.status(400).send(err);
 		p.getStatus(function(err, result) {
 		    console.log("status err %s result %s", err, JSON.stringify(result));
+		    if (!result) res.status(205).send('no status');
 		    p.pause(function (err, result) {
 			console.log("pause err %s result %s", err, JSON.stringify(result));
 			res.send(result);
@@ -198,7 +199,7 @@ app.post('/playMedia', function (req, res) {
     }
     options.media = body.media;
 
-    connectAndPlay(options, res);
+    connectAndPlayMedia(options, res);
 });
 
 app.post('/stop', function (req, res) {
