@@ -21,11 +21,12 @@
 'use strict';
 
 var Client = require('castv2-client').Client;
+var Application = require('castv2-client').Application;
 var DefaultMediaReceiver = require('castv2-client').DefaultMediaReceiver;
 
 // Google Cast
 
-function connectAndPlay(options) {
+function connectAndPlay(options, res) {
     let client = new Client();
     
     client.connect(options, function () {
@@ -34,13 +35,17 @@ function connectAndPlay(options) {
 	client.launch(DefaultMediaReceiver, function (err, player) {
 	    player.on('status', function (status) {
 		console.log('status broadcast playerState=%s', status.playerState);
+		if (status.playerState == "PLAYING") {
+		    client.close()
+		    res.send(status)
+		}
 	    });
 	    
 	    console.log('app "%s" launched, loading media %s ...', player.session.displayName, options.media.contentId);
 	    
 	    player.load(options.media, { autoplay: true }, function (err, status) {
 		console.log('media loaded err=%s status=%s', err, JSON.stringify(status));
-		client.close();
+//		client.close();
 	    });
 	});
     });
@@ -48,6 +53,37 @@ function connectAndPlay(options) {
     client.on('error', function (err) {
 	console.log('Error: %s', err.message);
 	client.close();
+    });
+}
+
+function connectAndStop(options, res) {
+    let client = new Client();
+    
+    client.connect(options, function () {
+	console.log('client.connect succeeded');
+
+	// client.getStatus(function (err, status) {
+	//     console.log('getStatus err %s status %s', err, JSON.stringify(status, null, 4));
+	// });
+	client.getSessions(function (err, sessions) {
+	    console.log('getSessions err %s sessions %s', err, JSON.stringify(sessions, null, 4));
+	    if (!sessions.length) return res.status(204).send('No app running');
+	    let session = sessions[0]
+	    client.join(session, Application, function (err, p) {
+		console.log("join err %s p %s", err, p);
+		if (err) return res.status(400).send(err);
+		client.stop(p, function (err, result) {
+		    console.log("stop err %s result %s", err, result);
+		    res.send("Stopped.");
+		});
+	    });
+	});
+    });
+    
+    client.on('error', function (err) {
+	console.log('Error: %s', err.message);
+	client.close();
+	res.status(400).send(err.essage)
     });
 }
 
@@ -59,7 +95,7 @@ let bodyParser = require('body-parser');
 let app = express();
 app.use(bodyParser.json({type: 'application/json'}));
 
-app.post('/play', function (req, res) {
+function getOptions(req, res) {
     console.log('Request headers: ' + JSON.stringify(req.headers, null, 4));
     console.log('Request body: ' + JSON.stringify(req.body, null, 4));
 
@@ -67,12 +103,14 @@ app.post('/play', function (req, res) {
     let body = req.body;
     if (!body) {
 	console.log('ERROR: POST body missing.\n');
-	return res.status(400).send('POST body missing.\n');
+	res.status(400).send('POST body missing.\n');
+	return null;
     }
 
     if (!body.host) {
 	console.log('ERROR: "host" parameter missing.\n');
-	return res.status(400).send('"host" parameter missing.\n');
+	res.status(400).send('"host" parameter missing.\n');
+	return null;
     }
     options.host = body.host;
 
@@ -80,15 +118,29 @@ app.post('/play', function (req, res) {
 	options.port = body.port;
     }
 
+    return options
+}
+
+app.post('/play', function (req, res) {
+    let options = getOptions(req, res);
+    if (!options) return;
+
+    let body = req.body;
+
     if (!body.media) {
 	console.log('ERROR: "media" parameter missing.\n');
 	return res.status(400).send('"media" parameter missing.\n');
     }
     options.media = body.media;
 
-    connectAndPlay(options);
+    connectAndPlay(options, res);
+});
 
-    res.send('Now playing ' + options.media.contentId + '.\n');
+app.post('/stop', function (req, res) {
+    let options = getOptions(req, res);
+    if (!options) return;
+
+    connectAndStop(options, res);
 });
 
 if (module === require.main) {
