@@ -21,8 +21,8 @@
 'use strict';
 
 var Client = require('castv2-client').Client;
-var Application = require('castv2-client').Application;
 var DefaultMediaReceiver = require('castv2-client').DefaultMediaReceiver;
+var debug = require('debug')('cast');
 
 // Google Cast
 
@@ -44,8 +44,9 @@ ctx.setMediaStatus = function(ctx, status) {
 
 function connect(ctx) {
     return new Promise(function(resolve, reject) {
-	console.log("Request headers: ", ctx.req.headers);
-	console.log("Request body:", ctx.req.body);
+	debug("connect");
+	debug("Request headers: ", ctx.req.headers);
+	debug("Request body:", ctx.req.body);
 
 	let body = ctx.req.body;
 	if (!body) {
@@ -84,6 +85,7 @@ function connect(ctx) {
 
 function getStatus(ctx) {
     return new Promise(function(resolve, reject) {
+	debug("getStatus");
 	ctx.client.getStatus(function(err, status) {
 	    if (err) {
 		return reject(err);
@@ -96,6 +98,7 @@ function getStatus(ctx) {
 
 function launch(ctx) {
     return new Promise(function(resolve, reject) {
+	debug("launch");
 	ctx.client.launch(DefaultMediaReceiver, function (err, app) {
 	    if (err) {
 		return reject(err);
@@ -115,6 +118,7 @@ function launch(ctx) {
 
 function load(ctx) {
     return new Promise(function(resolve, reject) {
+	debug("load");
 	let body = ctx.req.body;
 
 	if (!body.media) {
@@ -133,21 +137,24 @@ function load(ctx) {
 
 function getSessions(ctx) {
     return new Promise(function(resolve, reject) {
+	debug("getSessions");
 	ctx.client.getSessions(function (err, sessions) {
 	    if (err) {
 		return reject(err);
 	    }
-	    if (!sessions.length) {
+	    if (sessions.length) {
+		ctx.session = sessions[0];
+	    } else {
 		// FIXME, not really an error, unless trying to join
-		return reject(new Error("no session to join"));
+		//return reject(new Error("no session to join"));
 	    }
-	    ctx.session = sessions[0];
 	    resolve(ctx);
 	});
     });
 }
 
 function getMediaStatus(ctx) {
+    debug("getMediaStatus");
     return new Promise(function(resolve, reject) {
 	ctx.app.getStatus(function(err, status) {
 	    if (err) {
@@ -163,6 +170,7 @@ function getMediaStatus(ctx) {
 
 function join(ctx) {
     return new Promise(function(resolve, reject) {
+	debug("join");
 	// FIXME? DefaultMediaReceiver is actually too specialized, it could be some other app
 	ctx.client.join(ctx.session, DefaultMediaReceiver, function (err, app) {
 	    if (err) {
@@ -183,10 +191,9 @@ function join(ctx) {
 
 function stop(ctx) {
     return new Promise(function(resolve, reject) {
+	debug("stop");
 //	ctx.client.stop(ctx.app, function (err, result) {
-	console.log("stopping");
 	ctx.app.stop(function (err, result) {
-	    console.log("stop", result);
 	    if (err) {
 		return reject(err);
 	    }
@@ -197,6 +204,7 @@ function stop(ctx) {
 
 function pause(ctx) {
     return new Promise(function(resolve, reject) {
+	debug("pause");
 	ctx.app.pause(function (err, result) {
 	    if (err) {
 		return reject(err);
@@ -208,6 +216,7 @@ function pause(ctx) {
 
 function play(ctx) {
     return new Promise(function(resolve, reject) {
+	debug("play");
 	ctx.app.play(function (err, result) {
 	    if (err) {
 		return reject(err);
@@ -221,21 +230,27 @@ function attach(ctx) {
     return connect(ctx)
 	.then(getStatus)
 	.then(getSessions)
-	.then(join)
-	.then(getMediaStatus)
+	.then(function (ctx) {
+	    if (ctx.session) {
+		return join(ctx)
+		    .then(getMediaStatus);
+	    } else {
+		return ctx;
+	    }
+	})
 };
 
 function sendResponse(ctx) {
     var msg = {};
     if (ctx.status) { msg.status = ctx.status };
     if (ctx.mediaStatus) { msg.mediaStatus = ctx.mediaStatus };
-    console.log("sendResponse:", msg);
+    debug("sendResponse:", msg);
     ctx.res.send(msg);
     ctx.client.close();
 }
 
 function sendErrorResponse(ctx, code, err) {
-    console.log("SendErrorResponse(%d): %s", code, err);
+    debug("SendErrorResponse(%d): %s", code, err);
     ctx.res.status(code).send(err + "\n");
     if (ctx.client) {
 	ctx.client.close();
