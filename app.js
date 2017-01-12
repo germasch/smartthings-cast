@@ -104,6 +104,9 @@ function launch(ctx) {
 		ctx.setMediaStatus(ctx, status);
             };
 	    app.on('status', onStatus);
+	    if (app.setPlatform) {
+		app.setPlatform(ctx.client);
+	    }
 	    ctx.app = app;
 	    resolve(ctx);
 	});
@@ -181,7 +184,9 @@ function join(ctx) {
 function stop(ctx) {
     return new Promise(function(resolve, reject) {
 //	ctx.client.stop(ctx.app, function (err, result) {
+	console.log("stopping");
 	ctx.app.stop(function (err, result) {
+	    console.log("stop", result);
 	    if (err) {
 		return reject(err);
 	    }
@@ -308,7 +313,7 @@ app.post('/play', function (req, res) {
 	});
 });
 
-app.get('/status', function (req, res) {
+app.post('/status', function (req, res) {
     let ctx = getOptions(req, res);
 
     attach(ctx)
