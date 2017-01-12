@@ -26,131 +26,215 @@ var DefaultMediaReceiver = require('castv2-client').DefaultMediaReceiver;
 
 // Google Cast
 
-function connectAndPlayMedia(options, res) {
-    let client = new Client();
-    
-    client.connect(options, function () {
-	console.log('client.connect succeeded');
+let ctx = {};
+ctx.setStatus = function(ctx, status) {
+    ctx.status = status;
+    if (status.applications) {
+	console.log("setStatus -> %s", status.applications[0].statusText);
+    }
+}
+
+ctx.setMediaStatus = function(ctx, status) {
+    if (!status) {
+	return;
+    }
+    ctx.mediaStatus = status;
+    console.log("setMediaStatus -> %s", status.playerState);
+}
+
+function connect(ctx) {
+    return new Promise(function(resolve, reject) {
+	console.log("Request headers: ", ctx.req.headers);
+	console.log("Request body:", ctx.req.body);
+
+	let body = ctx.req.body;
+	if (!body) {
+	    return reject(new Error("POST body missing."));
+	}
 	
-	client.launch(DefaultMediaReceiver, function (err, player) {
-	    player.on('status', function (status) {
-		console.log('status broadcast playerState=%s', status.playerState);
-		if (status.playerState == "PLAYING") {
-		    client.close()
-		    res.send(status)
-		}
-	    });
-	    
-	    console.log('app "%s" launched, loading media %s ...', player.session.displayName, options.media.contentId);
-	    
-	    player.load(options.media, { autoplay: true }, function (err, status) {
-		console.log('media loaded err=%s status=%s', err, JSON.stringify(status));
-//		client.close();
-	    });
+	let address = {};
+	
+	if (!body.host) {
+	    return reject(new Error("'host' parameter missing."));
+	}
+	address.host = body.host;
+
+	if (body.port) {
+	    address.port = body.port;
+	}
+
+	var client = new Client();
+	client.connect(address, function () {
+	    ctx.client = client;
+	    resolve(ctx);
 	});
-    });
-    
-    client.on('error', function (err) {
-	console.log('Error: %s', err.message);
-	client.close();
+
+	var onStatus = function (status) {
+	    ctx.setStatus(ctx, status);
+	};
+	var onError = function (err) {
+	    console.log("Error: %s", err);
+	    client.removeListener("error", onError);
+	    reject(err);
+	};
+	client.on("error", onError);
+	client.on("status", onStatus);
     });
 }
 
-function connectAndStop(options, res) {
-    let client = new Client();
-    
-    client.connect(options, function () {
-	console.log('client.connect succeeded');
-
-	// client.getStatus(function (err, status) {
-	//     console.log('getStatus err %s status %s', err, JSON.stringify(status, null, 4));
-	// });
-	client.getSessions(function (err, sessions) {
-	    console.log('getSessions err %s sessions %s', err, JSON.stringify(sessions, null, 4));
-	    if (!sessions.length) return res.status(204).send('No app running');
-	    let session = sessions[0]
-	    // FIXME, DefaultMediaReceiver might be wrong, but really, we're only using the pass-through
-	    // to MediaController, so we're probably fine
-	    client.join(session, DefaultMediaReceiver, function (err, p) {
-		console.log("join err %s p %s", err, p);
-		if (err) return res.status(400).send(err);
-		p.media.currentSession = session;
-		client.stop(p, function (err, result) {
-		    console.log("stop err %s result %s", err, result);
-		    res.send("Stopped.");
-		});
-	    });
+function getStatus(ctx) {
+    return new Promise(function(resolve, reject) {
+	ctx.client.getStatus(function(err, status) {
+	    if (err) {
+		return reject(err);
+	    }
+	    ctx.setStatus(ctx, status);
+	    resolve(ctx);
 	});
-    });
-    
-    client.on('error', function (err) {
-	console.log('Error: %s', err.message);
-	client.close();
-	res.status(400).send(err.essage)
     });
 }
 
-function connectAndPause(options, res) {
-    let client = new Client();
-    
-    client.connect(options, function () {
-	console.log('client.connect succeeded');
-
-	client.getSessions(function (err, sessions) {
-	    console.log('getSessions err %s sessions %s', err, JSON.stringify(sessions, null, 4));
-	    if (!sessions.length) return res.status(400).send('No app running');
-	    let session = sessions[0]
-	    client.join(session, DefaultMediaReceiver, function (err, p) {
-		console.log("join err %s p %s", err, p);
-		if (err) return res.status(400).send(err);
-		p.getStatus(function(err, result) {
-		    console.log("status err %s result %s", err, JSON.stringify(result));
-		    if (!result) res.status(205).send('no status');
-		    p.pause(function (err, result) {
-			console.log("pause err %s result %s", err, JSON.stringify(result));
-			res.send(result);
-		    });
-		});
-	    });
+function launch(ctx) {
+    return new Promise(function(resolve, reject) {
+	ctx.client.launch(DefaultMediaReceiver, function (err, app) {
+	    if (err) {
+		return reject(err);
+	    }
+	    var onStatus = function(status) {
+		ctx.setMediaStatus(ctx, status);
+            };
+	    app.on('status', onStatus);
+	    ctx.app = app;
+	    resolve(ctx);
 	});
-    });
-    
-    client.on('error', function (err) {
-	console.log('Error: %s', err.message);
-	client.close();
-	res.status(400).send(err.essage)
     });
 }
 
-function connectAndPlay(options, res) {
-    let client = new Client();
-    
-    client.connect(options, function () {
-	console.log('client.connect succeeded');
+function load(ctx) {
+    return new Promise(function(resolve, reject) {
+	let body = ctx.req.body;
 
-	client.getSessions(function (err, sessions) {
-	    console.log('getSessions err %s sessions %s', err, JSON.stringify(sessions, null, 4));
-	    if (!sessions.length) return res.status(400).send('No app running');
-	    let session = sessions[0]
-	    client.join(session, DefaultMediaReceiver, function (err, p) {
-		console.log("join err %s p %s", err, p);
-		if (err) return res.status(400).send(err);
-		p.getStatus(function(err, result) {
-		    console.log("status err %s result %s", err, JSON.stringify(result));
-		    p.play(function (err, result) {
-			console.log("play err %s result %s", err, JSON.stringify(result));
-			res.send(result);
-		    });
-		});
-	    });
+	if (!body.media) {
+	    return reject(new Error('"media" parameter missing.\n'));
+	}
+
+	ctx.app.load(body.media, { autoplay: true }, function (err, status) {
+	    if (err) {
+		return reject(err);
+	    }
+	    ctx.mediaStatus = status;
+	    resolve(ctx);
 	});
     });
-    
-    client.on('error', function (err) {
-	console.log('Error: %s', err.message);
-	client.close();
-	res.status(400).send(err.essage)
+}
+
+function getSessions(ctx) {
+    return new Promise(function(resolve, reject) {
+	ctx.client.getSessions(function (err, sessions) {
+	    if (err) {
+		return reject(err);
+	    }
+	    if (!sessions.length) {
+		// FIXME, not really an error, unless trying to join
+		return reject(new Error("no session to join"));
+	    }
+	    ctx.session = sessions[0];
+	    resolve(ctx);
+	});
     });
+}
+
+function getMediaStatus(ctx) {
+    return new Promise(function(resolve, reject) {
+	ctx.app.getStatus(function(err, status) {
+	    if (err) {
+		return reject(err);
+	    }
+	    // not sure why this needs to be called here,
+	    // mostly the onStatus handler seems to take care of it
+	    ctx.setMediaStatus(ctx, status);
+	    resolve(ctx);
+	});
+    });
+}
+
+function join(ctx) {
+    return new Promise(function(resolve, reject) {
+	// FIXME? DefaultMediaReceiver is actually too specialized, it could be some other app
+	ctx.client.join(ctx.session, DefaultMediaReceiver, function (err, app) {
+	    if (err) {
+		return reject(err);
+	    }
+	    if (app.setPlatform) {
+		app.setPlatform(ctx.client);
+	    }
+	    var onStatus = function(status) {
+		ctx.setMediaStatus(ctx, status);
+            };
+	    app.on('status', onStatus);
+	    ctx.app = app;
+	    resolve(ctx);
+	});
+    });
+}
+
+function stop(ctx) {
+    return new Promise(function(resolve, reject) {
+//	ctx.client.stop(ctx.app, function (err, result) {
+	ctx.app.stop(function (err, result) {
+	    if (err) {
+		return reject(err);
+	    }
+	    resolve(ctx);
+	});
+    });
+}
+
+function pause(ctx) {
+    return new Promise(function(resolve, reject) {
+	ctx.app.pause(function (err, result) {
+	    if (err) {
+		return reject(err);
+	    }
+	    resolve(ctx);
+	});
+    });
+}
+
+function play(ctx) {
+    return new Promise(function(resolve, reject) {
+	ctx.app.play(function (err, result) {
+	    if (err) {
+		return reject(err);
+	    }
+	    resolve(ctx);
+	});
+    });
+}
+
+function attach(ctx) {
+    return connect(ctx)
+	.then(getStatus)
+	.then(getSessions)
+	.then(join)
+	.then(getMediaStatus)
+};
+
+function sendResponse(ctx) {
+    var msg = {};
+    if (ctx.status) { msg.status = ctx.status };
+    if (ctx.mediaStatus) { msg.mediaStatus = ctx.mediaStatus };
+    console.log("sendResponse:", msg);
+    ctx.res.send(msg);
+    ctx.client.close();
+}
+
+function sendErrorResponse(ctx, code, err) {
+    console.log("SendErrorResponse(%d): %s", code, err);
+    ctx.res.status(code).send(err + "\n");
+    if (ctx.client) {
+	ctx.client.close();
+    }
 }
 
 // REST service
@@ -162,65 +246,76 @@ let app = express();
 app.use(bodyParser.json({type: 'application/json'}));
 
 function getOptions(req, res) {
-    console.log('Request headers: ' + JSON.stringify(req.headers, null, 4));
-    console.log('Request body: ' + JSON.stringify(req.body, null, 4));
+    ctx.req = req;
+    ctx.res = res;
+    ctx.options = {};
 
-    let options = {};
-    let body = req.body;
-    if (!body) {
-	console.log('ERROR: POST body missing.\n');
-	res.status(400).send('POST body missing.\n');
-	return null;
-    }
-
-    if (!body.host) {
-	console.log('ERROR: "host" parameter missing.\n');
-	res.status(400).send('"host" parameter missing.\n');
-	return null;
-    }
-    options.host = body.host;
-
-    if (body.port) {
-	options.port = body.port;
-    }
-
-    return options
+    return ctx;
 }
 
 app.post('/playMedia', function (req, res) {
-    let options = getOptions(req, res);
-    if (!options) return;
+    let ctx = getOptions(req, res);
 
-    let body = req.body;
-
-    if (!body.media) {
-	console.log('ERROR: "media" parameter missing.\n');
-	return res.status(400).send('"media" parameter missing.\n');
-    }
-    options.media = body.media;
-
-    connectAndPlayMedia(options, res);
+    connect(ctx)
+	.then(launch)
+	.then(load)
+	.then(function(ctx) {
+	    return new Promise(function(resolve, reject) {
+		var onStatus = function (status) {
+		    if (status.playerState == "PLAYING") {
+			sendResponse(ctx);
+			resolve(ctx);
+		    } // FIXME, probably should do a timeout if we aren't getting "PLAYING"
+		};
+		ctx.app.on("status", onStatus);
+	    });
+	})
+	.catch(function(err) {
+	    sendErrorResponse(ctx, 400, err);
+	});
 });
 
 app.post('/stop', function (req, res) {
-    let options = getOptions(req, res);
-    if (!options) return;
+    let ctx = getOptions(req, res);
 
-    connectAndStop(options, res);
+    attach(ctx)
+	.then(stop)
+	.then(sendResponse)
+	.catch(function(err) { 
+	    sendErrorResponse(ctx, 400, err);
+	});
 });
 
 app.post('/pause', function (req, res) {
-    let options = getOptions(req, res);
-    if (!options) return;
+    let ctx = getOptions(req, res);
 
-    connectAndPause(options, res);
+    attach(ctx)
+	.then(pause)
+	.then(sendResponse)
+	.catch(function(err) { 
+	    sendErrorResponse(ctx, 400, err);
+	});
 });
 
 app.post('/play', function (req, res) {
-    let options = getOptions(req, res);
-    if (!options) return;
+    let ctx = getOptions(req, res);
 
-    connectAndPlay(options, res);
+    attach(ctx)
+	.then(play)
+	.then(sendResponse)
+	.catch(function(err) { 
+	    sendErrorResponse(ctx, 400, err);
+	});
+});
+
+app.get('/status', function (req, res) {
+    let ctx = getOptions(req, res);
+
+    attach(ctx)
+	.then(sendResponse)
+	.catch(function(err) { 
+	    sendErrorResponse(ctx, 400, err);
+	});
 });
 
 if (module === require.main) {
