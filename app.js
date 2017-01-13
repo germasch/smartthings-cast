@@ -233,6 +233,17 @@ Chromecast.prototype._play = function() {
     });
 }
 
+Chromecast.prototype._setVolume = function() {
+    let self = this;
+    return new Promise(function(resolve, reject) {
+	debug("setVolume", self.options.volume);
+	self.client.setVolume(self.options.volume, function (err, result) {
+	    if (err) { return reject(err); }
+	    resolve();
+	});
+    });
+}
+
 Chromecast.prototype._sendResponse = function() {
     var msg = {};
     if (this.status) { msg.status = this.status };
@@ -293,7 +304,7 @@ app.post('/playMedia', function (req, res) {
 	    });
 	})
 	.catch(function(err) {
-	    ctx.sendErrorResponse(500, err);
+	    ctx._sendErrorResponse(500, err);
 	});
 });
 
@@ -304,7 +315,7 @@ app.post('/stop', function (req, res) {
     	.then(() => { return ctx._stop(); })
 	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
-	    ctx.sendErrorResponse(500, err);
+	    ctx._sendErrorResponse(500, err);
 	});
 });
 
@@ -315,7 +326,7 @@ app.post('/pause', function (req, res) {
 	.then(() => { return ctx._pause(); })
 	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
-	    ctx.sendErrorResponse(500, err);
+	    ctx._sendErrorResponse(500, err);
 	});
 });
 
@@ -326,7 +337,20 @@ app.post('/play', function (req, res) {
 	.then(() => { return ctx._play(); })
 	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
-	    ctx.sendErrorResponse(500, err);
+	    ctx._sendErrorResponse(500, err);
+	});
+});
+
+app.post('/volume', function (req, res) {
+    let ctx = new Chromecast(req, res);
+    ctx.options.volume = req.body.volume;
+
+    Promise.resolve()
+	.then(() => { return ctx._connect() })
+	.then(() => { return ctx._setVolume(); })
+	.then(() => { return ctx._sendResponse(); })
+	.catch(function(err) { 
+	    ctx._sendErrorResponse(500, err);
 	});
 });
 
@@ -336,7 +360,7 @@ app.post('/status', function (req, res) {
     attach(ctx)
 	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
-	    ctx.sendErrorResponse(500, err);
+	    ctx._sendErrorResponse(500, err);
 	});
 });
 
