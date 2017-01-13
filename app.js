@@ -21,6 +21,13 @@
 // FIXME, rather than just ignoring commands that don't fit current state
 // (e.g., play when no app is loaded), we should return an appropriate status
 
+// body.media -> put into options
+
+// whole object mess
+
+// googleplaymusic doesn't react instanteneously to pause/play, so will have to listen for updated status
+
+
 'use strict';
 
 var Client = require('castv2-client').Client;
@@ -98,9 +105,6 @@ Chromecast.prototype._launch = function() {
 	debug("launch");
 	self.client.launch(DefaultMediaReceiver, function(err, app) {
 	    if (err) { return reject(err); }
-	    if (app.setPlatform) {
-		app.setPlatform(self.client);
-	    }
 	    var onStatus = function(status) {
 		self._setMediaStatus(status);
             };
@@ -181,9 +185,6 @@ Chromecast.prototype._join = function() {
 	// FIXME? DefaultMediaReceiver is actually too specialized, it could be some other app
 	self.client.join(self.session, DefaultMediaReceiver, function(err, app) {
 	    if (err) { return reject(err); }
-	    if (app.setPlatform) {
-		app.setPlatform(self.client);
-	    }
 	    var onStatus = function(status) {
 		self._setMediaStatus(status);
             };
@@ -212,8 +213,10 @@ Chromecast.prototype._getMediaStatus = function() {
 Chromecast.prototype._pause = function() {
     let self = this;
     return new Promise(function(resolve, reject) {
-	debug("pause");
-	if (!self.app) { return resolve(); }
+	debug("pause")
+	if (!self.app || !self.app.media.currentSession) {
+	    return resolve();
+	}
 	self.app.pause(function (err, result) {
 	    if (err) { return reject(err); }
 	    resolve();
@@ -225,7 +228,9 @@ Chromecast.prototype._play = function() {
     let self = this;
     return new Promise(function(resolve, reject) {
 	debug("play");
-	if (!self.app) { return resolve(); }
+	if (!self.app || !self.app.media.currentSession) {
+	    return resolve();
+	}
 	self.app.play(function (err, result) {
 	    if (err) { return reject(err); }
 	    resolve();
@@ -238,6 +243,18 @@ Chromecast.prototype._setVolume = function() {
     return new Promise(function(resolve, reject) {
 	debug("setVolume", self.options.volume);
 	self.client.setVolume(self.options.volume, function (err, result) {
+	    if (err) { return reject(err); }
+	    resolve();
+	});
+    });
+}
+
+Chromecast.prototype._queueUpdate = function() {
+    let self = this;
+    return new Promise(function(resolve, reject) {
+	debug("queueUpdate", self.options.update);
+	self.client.queueUpdate(self.options.update.items, self.options.update.options,
+				function (err, result) {
 	    if (err) { return reject(err); }
 	    resolve();
 	});
@@ -348,6 +365,19 @@ app.post('/volume', function (req, res) {
     Promise.resolve()
 	.then(() => { return ctx._connect() })
 	.then(() => { return ctx._setVolume(); })
+	.then(() => { return ctx._sendResponse(); })
+	.catch(function(err) { 
+	    ctx._sendErrorResponse(500, err);
+	});
+});
+
+app.post('/queueUpdate', function (req, res) {
+    let ctx = new Chromecast(req, res);
+    ctx.options.update = req.body.update;
+
+    Promise.resolve()
+	.then(() => { return ctx._connect() })
+	.then(() => { return ctx._queueUpdate(); })
 	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
 	    ctx._sendErrorResponse(500, err);
