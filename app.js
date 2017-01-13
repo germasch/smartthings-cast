@@ -253,7 +253,10 @@ Chromecast.prototype._queueUpdate = function() {
     let self = this;
     return new Promise(function(resolve, reject) {
 	debug("queueUpdate", self.options.update);
-	self.client.queueUpdate(self.options.update.items, self.options.update.options,
+	if (!self.app || !self.app.media.currentSession) {
+	    return resolve();
+	}
+	self.app.queueUpdate(self.options.update.items, self.options.update.options,
 				function (err, result) {
 	    if (err) { return reject(err); }
 	    resolve();
