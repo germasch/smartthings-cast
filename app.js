@@ -18,62 +18,70 @@
 // You should have received a copy of the GNU General Public License
 // along with SmartThings-Cast.  If not, see <http://www.gnu.org/licenses/>.
 
+// FIXME, rather than just ignoring commands that don't fit current state
+// (e.g., play when no app is loaded), we should return an appropriate status
+
 'use strict';
 
 var Client = require('castv2-client').Client;
 var DefaultMediaReceiver = require('castv2-client').DefaultMediaReceiver;
-var debug = require('debug')('cast');
+var debug = require('debug')('chromecast');
 
 // Google Cast
 
-let ctx = {};
-ctx.setStatus = function(ctx, status) {
-    ctx.status = status;
+function Chromecast(req, res) {
+    this.req = req;
+    this.res = res;
+    this.options = {};
+}
+
+Chromecast.prototype._setStatus = function(status) {
+    this.status = status;
     if (status.applications) {
-	console.log("setStatus -> %s", status.applications[0].statusText);
+	debug("setStatus: volume -> %s statusText -> %s", status.volume.level,
+	      status.applications[0].statusText);
+    } else {
+	debug("setStatus: volume -> %s", status.volume.level);
     }
 }
 
-ctx.setMediaStatus = function(ctx, status) {
+Chromecast.prototype._setMediaStatus = function(status) {
     if (!status) {
+	debug("setMediaStatus: status = %s", status);
 	return;
     }
-    ctx.mediaStatus = status;
-    console.log("setMediaStatus -> %s", status.playerState);
+    this.mediaStatus = status;
+    debug("setMediaStatus -> %s", status.playerState);
 }
 
-function connect(ctx) {
+Chromecast.prototype._connect = function() {
+    let self = this;
+
     return new Promise(function(resolve, reject) {
 	debug("connect");
-	debug("Request headers: ", ctx.req.headers);
-	debug("Request body:", ctx.req.body);
+	debug("Request headers: ", self.req.headers);
+	debug("Request body:", self.req.body);
 
-	let body = ctx.req.body;
-	if (!body) {
-	    return reject(new Error("POST body missing."));
-	}
+	let body = self.req.body;
+	if (!body) { return reject(new Error("POST body missing.")); }
 	
 	let address = {};
 	
-	if (!body.host) {
-	    return reject(new Error("'host' parameter missing."));
-	}
+	if (!body.host) { return reject(new Error("'host' parameter missing.")); }
 	address.host = body.host;
 
-	if (body.port) {
-	    address.port = body.port;
-	}
+	if (body.port) { address.port = body.port; }
 
 	var client = new Client();
-	client.connect(address, function () {
-	    ctx.client = client;
-	    resolve(ctx);
+	client.connect(address, function() {
+	    self.client = client;
+	    resolve();
 	});
 
-	var onStatus = function (status) {
-	    ctx.setStatus(ctx, status);
+	var onStatus = function(status) {
+	    self._setStatus(status);
 	};
-	var onError = function (err) {
+	var onError = function(err) {
 	    console.log("Error: %s", err);
 	    client.removeListener("error", onError);
 	    reject(err);
@@ -83,179 +91,180 @@ function connect(ctx) {
     });
 }
 
-function getStatus(ctx) {
-    return new Promise(function(resolve, reject) {
-	debug("getStatus");
-	ctx.client.getStatus(function(err, status) {
-	    if (err) {
-		return reject(err);
-	    }
-	    ctx.setStatus(ctx, status);
-	    resolve(ctx);
-	});
-    });
-}
+Chromecast.prototype._launch = function() {
+    let self = this;
 
-function launch(ctx) {
     return new Promise(function(resolve, reject) {
 	debug("launch");
-	ctx.client.launch(DefaultMediaReceiver, function (err, app) {
-	    if (err) {
-		return reject(err);
+	self.client.launch(DefaultMediaReceiver, function(err, app) {
+	    if (err) { return reject(err); }
+	    if (app.setPlatform) {
+		app.setPlatform(self.client);
 	    }
 	    var onStatus = function(status) {
-		ctx.setMediaStatus(ctx, status);
+		self._setMediaStatus(status);
             };
 	    app.on('status', onStatus);
-	    if (app.setPlatform) {
-		app.setPlatform(ctx.client);
-	    }
-	    ctx.app = app;
-	    resolve(ctx);
+	    self.app = app;
+	    resolve();
 	});
     });
 }
 
-function load(ctx) {
+Chromecast.prototype._load = function() {
+    let self = this;
+
     return new Promise(function(resolve, reject) {
 	debug("load");
-	let body = ctx.req.body;
+	let body = self.req.body;
 
-	if (!body.media) {
-	    return reject(new Error('"media" parameter missing.\n'));
-	}
+	if (!body.media) { return reject(new Error('"media" parameter missing.\n')); }
 
-	ctx.app.load(body.media, { autoplay: true }, function (err, status) {
-	    if (err) {
-		return reject(err);
-	    }
-	    ctx.mediaStatus = status;
-	    resolve(ctx);
+	self.app.load(body.media, { autoplay: true }, function(err, status) {
+	    if (err) { return reject(err); }
+	    self.mediaStatus = status;
+	    resolve();
 	});
     });
 }
 
-function getSessions(ctx) {
+Chromecast.prototype._getStatus = function() {
+    let self = this;
+
+    return new Promise(function(resolve, reject) {
+	debug("getStatus");
+	self.client.getStatus(function(err, status) {
+	    if (err) { return reject(err); }
+	    self._setStatus(status);
+	    resolve();
+	});
+    });
+}
+
+Chromecast.prototype._getSessions = function() {
+    let self = this;
+
     return new Promise(function(resolve, reject) {
 	debug("getSessions");
-	ctx.client.getSessions(function (err, sessions) {
-	    if (err) {
-		return reject(err);
-	    }
+	self.client.getSessions(function(err, sessions) {
+	    if (err) { return reject(err); }
 	    if (sessions.length) {
-		ctx.session = sessions[0];
+		self.session = sessions[0];
 	    } else {
 		// FIXME, not really an error, unless trying to join
 		//return reject(new Error("no session to join"));
 	    }
-	    resolve(ctx);
+	    resolve();
 	});
     });
 }
 
-function getMediaStatus(ctx) {
-    debug("getMediaStatus");
+Chromecast.prototype._stop = function() {
+    let self = this;
+
     return new Promise(function(resolve, reject) {
-	ctx.app.getStatus(function(err, status) {
-	    if (err) {
-		return reject(err);
-	    }
-	    // not sure why this needs to be called here,
-	    // mostly the onStatus handler seems to take care of it
-	    ctx.setMediaStatus(ctx, status);
-	    resolve(ctx);
+	debug("stop");
+	if (!self.app) { return resolve(); }
+	self.client.stop(self.app, function (err, result) {
+	    debug("stopped", result);
+	    self.mediaStatus = null;
+	    if (err) { return reject(err); }
+	    resolve();
 	});
     });
 }
 
-function join(ctx) {
+Chromecast.prototype._join = function() {
+    let self = this;
     return new Promise(function(resolve, reject) {
 	debug("join");
 	// FIXME? DefaultMediaReceiver is actually too specialized, it could be some other app
-	ctx.client.join(ctx.session, DefaultMediaReceiver, function (err, app) {
-	    if (err) {
-		return reject(err);
-	    }
+	self.client.join(self.session, DefaultMediaReceiver, function(err, app) {
+	    if (err) { return reject(err); }
 	    if (app.setPlatform) {
-		app.setPlatform(ctx.client);
+		app.setPlatform(self.client);
 	    }
 	    var onStatus = function(status) {
-		ctx.setMediaStatus(ctx, status);
+		self._setMediaStatus(status);
             };
 	    app.on('status', onStatus);
-	    ctx.app = app;
-	    resolve(ctx);
+	    self.app = app;
+	    resolve();
 	});
     });
 }
 
-function stop(ctx) {
+Chromecast.prototype._getMediaStatus = function() {
+    let self = this;
+
     return new Promise(function(resolve, reject) {
-	debug("stop");
-//	ctx.client.stop(ctx.app, function (err, result) {
-	ctx.app.stop(function (err, result) {
-	    if (err) {
-		return reject(err);
-	    }
-	    resolve(ctx);
+	debug("getMediaStatus");
+	self.app.getStatus(function(err, status) {
+	    if (err) { return reject(err); }
+	    // not sure why this needs to be called here,
+	    // mostly the onStatus handler seems to take care of it
+	    self._setMediaStatus(status);
+	    resolve();
 	});
     });
 }
 
-function pause(ctx) {
+Chromecast.prototype._pause = function() {
+    let self = this;
     return new Promise(function(resolve, reject) {
 	debug("pause");
-	ctx.app.pause(function (err, result) {
-	    if (err) {
-		return reject(err);
-	    }
-	    resolve(ctx);
+	if (!self.app) { return resolve(); }
+	self.app.pause(function (err, result) {
+	    if (err) { return reject(err); }
+	    resolve();
 	});
     });
 }
 
-function play(ctx) {
+Chromecast.prototype._play = function() {
+    let self = this;
     return new Promise(function(resolve, reject) {
 	debug("play");
-	ctx.app.play(function (err, result) {
-	    if (err) {
-		return reject(err);
-	    }
-	    resolve(ctx);
+	if (!self.app) { return resolve(); }
+	self.app.play(function (err, result) {
+	    if (err) { return reject(err); }
+	    resolve();
 	});
     });
+}
+
+Chromecast.prototype._sendResponse = function() {
+    var msg = {};
+    if (this.status) { msg.status = this.status };
+    if (this.mediaStatus) { msg.mediaStatus = this.mediaStatus };
+    debug("sendResponse:", msg);
+    this.res.send(msg);
+    this.client.close();
+}
+
+Chromecast.prototype._sendErrorResponse = function(code, err) {
+    debug("SendErrorResponse(%d): %s", code, err);
+    this.res.status(code).send(err + "\n");
+    if (this.client) {
+	this.client.close();
+    }
 }
 
 function attach(ctx) {
-    return connect(ctx)
-	.then(getStatus)
-	.then(getSessions)
-	.then(function (ctx) {
+    return Promise.resolve()
+	.then(() => { return ctx._connect(); })
+	.then(() => { return ctx._getStatus(); })
+	.then(() => { return ctx._getSessions(); })
+	.then(() => {
 	    if (ctx.session) {
-		return join(ctx)
-		    .then(getMediaStatus);
+		return Promise.resolve()
+		    .then(() => { return ctx._join(); })
+		    .then(() => { return ctx._getMediaStatus(); });
 	    } else {
-		return ctx;
+		return Promise.resolve();
 	    }
 	})
 };
-
-function sendResponse(ctx) {
-    var msg = {};
-    if (ctx.status) { msg.status = ctx.status };
-    if (ctx.mediaStatus) { msg.mediaStatus = ctx.mediaStatus };
-    debug("sendResponse:", msg);
-    ctx.res.send(msg);
-    ctx.client.close();
-}
-
-function sendErrorResponse(ctx, code, err) {
-    debug("SendErrorResponse(%d): %s", code, err);
-    ctx.res.status(code).send(err + "\n");
-    if (ctx.client) {
-	ctx.client.close();
-    }
-}
 
 // REST service
 
@@ -265,76 +274,69 @@ let bodyParser = require('body-parser');
 let app = express();
 app.use(bodyParser.json({type: 'application/json'}));
 
-function getOptions(req, res) {
-    ctx.req = req;
-    ctx.res = res;
-    ctx.options = {};
-
-    return ctx;
-}
-
 app.post('/playMedia', function (req, res) {
-    let ctx = getOptions(req, res);
+    let ctx = new Chromecast(req, res);
 
-    connect(ctx)
-	.then(launch)
-	.then(load)
-	.then(function(ctx) {
+    Promise.resolve()
+	.then(() => { return ctx._connect() })
+	.then(() => { return ctx._launch() })
+	.then(() => { return ctx._load() })
+	.then(() => {
 	    return new Promise(function(resolve, reject) {
 		var onStatus = function (status) {
 		    if (status.playerState == "PLAYING") {
-			sendResponse(ctx);
-			resolve(ctx);
+			ctx._sendResponse();
+			resolve();
 		    } // FIXME, probably should do a timeout if we aren't getting "PLAYING"
 		};
 		ctx.app.on("status", onStatus);
 	    });
 	})
 	.catch(function(err) {
-	    sendErrorResponse(ctx, 400, err);
+	    ctx.sendErrorResponse(500, err);
 	});
 });
 
 app.post('/stop', function (req, res) {
-    let ctx = getOptions(req, res);
+    let ctx = new Chromecast(req, res);
 
     attach(ctx)
-	.then(stop)
-	.then(sendResponse)
+    	.then(() => { return ctx._stop(); })
+	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
-	    sendErrorResponse(ctx, 400, err);
+	    ctx.sendErrorResponse(500, err);
 	});
 });
 
 app.post('/pause', function (req, res) {
-    let ctx = getOptions(req, res);
+    let ctx = new Chromecast(req, res);
 
     attach(ctx)
-	.then(pause)
-	.then(sendResponse)
+	.then(() => { return ctx._pause(); })
+	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
-	    sendErrorResponse(ctx, 400, err);
+	    ctx.sendErrorResponse(500, err);
 	});
 });
 
 app.post('/play', function (req, res) {
-    let ctx = getOptions(req, res);
+    let ctx = new Chromecast(req, res);
 
     attach(ctx)
-	.then(play)
-	.then(sendResponse)
+	.then(() => { return ctx._play(); })
+	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
-	    sendErrorResponse(ctx, 400, err);
+	    ctx.sendErrorResponse(500, err);
 	});
 });
 
 app.post('/status', function (req, res) {
-    let ctx = getOptions(req, res);
+    let ctx = new Chromecast(req, res);
 
     attach(ctx)
-	.then(sendResponse)
+	.then(() => { return ctx._sendResponse(); })
 	.catch(function(err) { 
-	    sendErrorResponse(ctx, 400, err);
+	    ctx.sendErrorResponse(500, err);
 	});
 });
 
