@@ -34,12 +34,30 @@ var Client = require('castv2-client').Client;
 var DefaultMediaReceiver = require('castv2-client').DefaultMediaReceiver;
 var debug = require('debug')('chromecast');
 
+// Response
+
+function Response(code, response) {
+    this.code = code;
+    this.response = response;
+}
+
 // Google Cast
 
 function Chromecast(req, res) {
+    //debug("Request headers: ", req.headers);
+    debug("Request body:", req.body);
+
     this.req = req;
     this.res = res;
     this.options = {};
+
+    let body = req.body;
+    if (!body) return;
+    
+    if (!body.host) return;
+    this.options.address = { host: body.host };
+    
+    if (body.port) { this.options.address.port = body.port; }
 }
 
 Chromecast.prototype._setStatus = function(status) {
@@ -53,6 +71,7 @@ Chromecast.prototype._setStatus = function(status) {
 }
 
 Chromecast.prototype._setMediaStatus = function(status) {
+    // FIXME, should update from partial messages
     if (!status) {
 	debug("setMediaStatus: status = %s", status);
 	return;
@@ -65,22 +84,12 @@ Chromecast.prototype._connect = function() {
     let self = this;
 
     return new Promise(function(resolve, reject) {
-	debug("connect");
-	debug("Request headers: ", self.req.headers);
-	debug("Request body:", self.req.body);
-
-	let body = self.req.body;
-	if (!body) { return reject(new Error("POST body missing.")); }
-	
-	let address = {};
-	
-	if (!body.host) { return reject(new Error("'host' parameter missing.")); }
-	address.host = body.host;
-
-	if (body.port) { address.port = body.port; }
+	if (!self.options.address) {
+	    return reject(new Response(400, "no proper chromecast address passed."));
+	}
 
 	var client = new Client();
-	client.connect(address, function() {
+	client.connect(self.options.address, function() {
 	    self.client = client;
 	    resolve();
 	});
@@ -108,7 +117,12 @@ Chromecast.prototype._launch = function() {
 	    var onStatus = function(status) {
 		self._setMediaStatus(status);
             };
-	    app.on('status', onStatus);
+	    var onError = function(err) {
+		console.log("Error: %s", err);
+		reject(err);
+	    };
+	    app.on("error", onError);
+	    app.on("status", onStatus);
 	    self.app = app;
 	    resolve();
 	});
@@ -120,11 +134,7 @@ Chromecast.prototype._load = function() {
 
     return new Promise(function(resolve, reject) {
 	debug("load");
-	let body = self.req.body;
-
-	if (!body.media) { return reject(new Error('"media" parameter missing.\n')); }
-
-	self.app.load(body.media, { autoplay: true }, function(err, status) {
+	self.app.load(self.options.media, { autoplay: true }, function(err, status) {
 	    if (err) { return reject(err); }
 	    self.mediaStatus = status;
 	    resolve();
@@ -140,7 +150,7 @@ Chromecast.prototype._getStatus = function() {
 	self.client.getStatus(function(err, status) {
 	    if (err) { return reject(err); }
 	    self._setStatus(status);
-	    resolve();
+	    resolve(status);
 	});
     });
 }
@@ -152,86 +162,17 @@ Chromecast.prototype._getSessions = function() {
 	debug("getSessions");
 	self.client.getSessions(function(err, sessions) {
 	    if (err) { return reject(err); }
-	    if (sessions.length) {
-		self.session = sessions[0];
-	    } else {
-		// FIXME, not really an error, unless trying to join
-		//return reject(new Error("no session to join"));
-	    }
-	    resolve();
+	    resolve(sessions);
 	});
     });
 }
 
 Chromecast.prototype._stop = function() {
     let self = this;
-
     return new Promise(function(resolve, reject) {
 	debug("stop");
-	if (!self.app) { return resolve(); }
 	self.client.stop(self.app, function (err, result) {
-	    debug("stopped", result);
 	    self.mediaStatus = null;
-	    if (err) { return reject(err); }
-	    resolve();
-	});
-    });
-}
-
-Chromecast.prototype._join = function() {
-    let self = this;
-    return new Promise(function(resolve, reject) {
-	debug("join");
-	// FIXME? DefaultMediaReceiver is actually too specialized, it could be some other app
-	self.client.join(self.session, DefaultMediaReceiver, function(err, app) {
-	    if (err) { return reject(err); }
-	    var onStatus = function(status) {
-		self._setMediaStatus(status);
-            };
-	    app.on('status', onStatus);
-	    self.app = app;
-	    resolve();
-	});
-    });
-}
-
-Chromecast.prototype._getMediaStatus = function() {
-    let self = this;
-
-    return new Promise(function(resolve, reject) {
-	debug("getMediaStatus");
-	self.app.getStatus(function(err, status) {
-	    if (err) { return reject(err); }
-	    // not sure why this needs to be called here,
-	    // mostly the onStatus handler seems to take care of it
-	    self._setMediaStatus(status);
-	    resolve();
-	});
-    });
-}
-
-Chromecast.prototype._pause = function() {
-    let self = this;
-    return new Promise(function(resolve, reject) {
-	debug("pause")
-	if (!self.app || !self.app.media.currentSession) {
-	    return resolve();
-	}
-	self.app.pause(function (err, result) {
-	    if (err) { return reject(err); }
-	    resolve();
-	});
-    });
-}
-
-Chromecast.prototype._play = function() {
-    let self = this;
-    return new Promise(function(resolve, reject) {
-	debug("play");
-	if (!self.app || !self.app.media.currentSession) {
-	    return resolve();
-	}
-	self.app.play(function (err, result) {
 	    if (err) { return reject(err); }
 	    resolve();
 	});
@@ -249,15 +190,65 @@ Chromecast.prototype._setVolume = function() {
     });
 }
 
+Chromecast.prototype._join = function(session) {
+    let self = this;
+    return new Promise(function(resolve, reject) {
+	debug("join");
+	// FIXME? DefaultMediaReceiver is actually too specialized, it could be some other app
+	self.client.join(session, DefaultMediaReceiver, function(err, app) {
+	    if (err) { return reject(err); }
+	    var onStatus = function(status) {
+		self._setMediaStatus(status);
+            };
+	    app.on('status', onStatus);
+	    self.app = app;
+	    resolve();
+	});
+    })  // need to get media status to establish mediaSessionId, which is required for sending
+        // commands
+	.then(() => self._getMediaStatus())
+}
+
+Chromecast.prototype._getMediaStatus = function() {
+    let self = this;
+    return new Promise(function(resolve, reject) {
+	debug("getMediaStatus");
+	self.app.getStatus(function(err, status) {
+	    if (err) { return reject(err); }
+	    self._setMediaStatus(status);
+	    resolve(status);
+	});
+    });
+}
+
+Chromecast.prototype._pause = function() {
+    let self = this;
+    return new Promise(function(resolve, reject) {
+	debug("pause")
+	self.app.pause(function (err, result) {
+	    if (err) { return reject(err); }
+	    resolve();
+	});
+    });
+}
+
+Chromecast.prototype._play = function() {
+    let self = this;
+    return new Promise(function(resolve, reject) {
+	debug("play");
+	self.app.play(function (err, result) {
+	    if (err) { return reject(err); }
+	    resolve();
+	});
+    });
+}
+
 Chromecast.prototype._queueUpdate = function() {
     let self = this;
     return new Promise(function(resolve, reject) {
 	debug("queueUpdate", self.options.update);
-	if (!self.app || !self.app.media.currentSession) {
-	    return resolve();
-	}
 	self.app.queueUpdate(self.options.update.items, self.options.update.options,
-				function (err, result) {
+			     function (err, result) {
 	    if (err) { return reject(err); }
 	    resolve();
 	});
@@ -266,16 +257,26 @@ Chromecast.prototype._queueUpdate = function() {
 
 Chromecast.prototype._sendResponse = function() {
     var msg = {};
-    if (this.status) { msg.status = this.status };
-    if (this.mediaStatus) { msg.mediaStatus = this.mediaStatus };
+    msg.response = this.response;
+    msg.status = this.status;
+    msg.mediaStatus = this.mediaStatus;
     debug("sendResponse:", msg);
     this.res.send(msg);
     this.client.close();
 }
 
-Chromecast.prototype._sendErrorResponse = function(code, err) {
-    debug("SendErrorResponse(%d): %s", code, err);
-    this.res.status(code).send(err + "\n");
+Chromecast.prototype._sendErrorResponse = function(err) {
+    if (err instanceof Response) {
+	var msg = {};
+	msg.response = err.response;
+	msg.status = this.status;
+	msg.mediaStatus = this.mediaStatus;
+	debug("sendErrorResponse:", err.code, msg);
+	this.res.status(err.code).send(msg);
+    } else {
+	debug("SendErrorResponse:", err);
+	this.res.status(500).send(err + "\n");
+    }
     if (this.client) {
 	this.client.close();
     }
@@ -284,16 +285,20 @@ Chromecast.prototype._sendErrorResponse = function(code, err) {
 function attach(ctx) {
     return Promise.resolve()
 	.then(() => { return ctx._connect(); })
-	.then(() => { return ctx._getStatus(); })
-	.then(() => { return ctx._getSessions(); })
-	.then(() => {
-	    if (ctx.session) {
-		return Promise.resolve()
-		    .then(() => { return ctx._join(); })
-		    .then(() => { return ctx._getMediaStatus(); });
-	    } else {
-		return Promise.resolve();
+    // getting the receiver status is somewhat redundant, as we're going to
+    // get it again in getSessions(), but there it won't be passed back to us,
+    // and because it's not a broadcast, it'll not register in the onStatus handler,
+    // either.
+	.then(() => ctx._getStatus() )
+	.then(() => ctx._getSessions() )
+	.then((sessions) => {
+	    if (!sessions || !sessions[0]) {
+		return Promise.reject(new Response(202, "No running app to attach."));
 	    }
+	    if (!sessions[0].namespaces.find(x => x.name === "urn:x-cast:com.google.cast.media")) {
+		return Promise.reject(new Response(202, "Running app does not support MediaController"));
+	    };
+	    return ctx._join(sessions[0]);
 	})
 };
 
@@ -307,11 +312,15 @@ app.use(bodyParser.json({type: 'application/json'}));
 
 app.post('/playMedia', function (req, res) {
     let ctx = new Chromecast(req, res);
+    if (!req.body.media) {
+	return ctx._sendErrorResponse(new Response(400, '"media" parameter missing.\n'));
+    }
+    ctx.options.media = req.body.media;
 
     Promise.resolve()
-	.then(() => { return ctx._connect() })
-	.then(() => { return ctx._launch() })
-	.then(() => { return ctx._load() })
+	.then(() => ctx._connect() )
+	.then(() => ctx._launch() )
+	.then(() => ctx._load() )
 	.then(() => {
 	    return new Promise(function(resolve, reject) {
 		var onStatus = function (status) {
@@ -323,42 +332,34 @@ app.post('/playMedia', function (req, res) {
 		ctx.app.on("status", onStatus);
 	    });
 	})
-	.catch(function(err) {
-	    ctx._sendErrorResponse(500, err);
-	});
+	.catch((err) => ctx._sendErrorResponse(err) );
 });
 
 app.post('/stop', function (req, res) {
     let ctx = new Chromecast(req, res);
 
     attach(ctx)
-    	.then(() => { return ctx._stop(); })
-	.then(() => { return ctx._sendResponse(); })
-	.catch(function(err) { 
-	    ctx._sendErrorResponse(500, err);
-	});
+    	.then(() => ctx._stop() )
+	.then(() => ctx._sendResponse() )
+	.catch((err) => ctx._sendErrorResponse(err) );
 });
 
 app.post('/pause', function (req, res) {
     let ctx = new Chromecast(req, res);
 
     attach(ctx)
-	.then(() => { return ctx._pause(); })
-	.then(() => { return ctx._sendResponse(); })
-	.catch(function(err) { 
-	    ctx._sendErrorResponse(500, err);
-	});
+    	.then(() => ctx._pause() )
+	.then(() => ctx._sendResponse() )
+	.catch((err) => ctx._sendErrorResponse(err) );
 });
 
 app.post('/play', function (req, res) {
     let ctx = new Chromecast(req, res);
 
     attach(ctx)
-	.then(() => { return ctx._play(); })
-	.then(() => { return ctx._sendResponse(); })
-	.catch(function(err) { 
-	    ctx._sendErrorResponse(500, err);
-	});
+    	.then(() => ctx._play() )
+	.then(() => ctx._sendResponse() )
+	.catch((err) => ctx._sendErrorResponse(err) );
 });
 
 app.post('/volume', function (req, res) {
@@ -366,25 +367,20 @@ app.post('/volume', function (req, res) {
     ctx.options.volume = req.body.volume;
 
     Promise.resolve()
-	.then(() => { return ctx._connect() })
-	.then(() => { return ctx._setVolume(); })
-	.then(() => { return ctx._sendResponse(); })
-	.catch(function(err) { 
-	    ctx._sendErrorResponse(500, err);
-	});
+	.then(() => ctx._connect() )
+	.then(() => ctx._setVolume() )
+	.then(() => ctx._sendResponse() )
+	.catch((err) => ctx._sendErrorResponse(err) );
 });
 
 app.post('/queueUpdate', function (req, res) {
     let ctx = new Chromecast(req, res);
     ctx.options.update = req.body.update;
 
-    Promise.resolve()
-	.then(() => { return ctx._connect() })
+    attach(ctx)
 	.then(() => { return ctx._queueUpdate(); })
 	.then(() => { return ctx._sendResponse(); })
-	.catch(function(err) { 
-	    ctx._sendErrorResponse(500, err);
-	});
+	.catch((err) => ctx._sendErrorResponse(err) );
 });
 
 app.post('/status', function (req, res) {
@@ -392,9 +388,7 @@ app.post('/status', function (req, res) {
 
     attach(ctx)
 	.then(() => { return ctx._sendResponse(); })
-	.catch(function(err) { 
-	    ctx._sendErrorResponse(500, err);
-	});
+	.catch((err) => ctx._sendErrorResponse(err) );
 });
 
 if (module === require.main) {
