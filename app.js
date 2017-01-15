@@ -318,7 +318,7 @@ Chromecast.prototype._sendResponse = function() {
     msg.mediaStatus = this.mediaStatus;
     debug("sendResponse:", msg);
     this.res.send(msg);
-    if (this.app) { this.app.close(); }
+//    if (this.app) { this.app.close(); }
     if (this.client) { this.client.close(); }
 }
 
@@ -334,7 +334,7 @@ Chromecast.prototype._sendErrorResponse = function(err) {
 	debug("SendErrorResponse:", err);
 	this.res.status(500).send(err + "\n");
     }
-    if (this.app) { this.app.close(); }
+//    if (this.app) { this.app.close(); }
     if (this.client) { this.client.close(); }
 }
 
@@ -418,6 +418,7 @@ app.post('/volume', function (req, res) {
     Promise.resolve()
 	.then(() => ctx._connect() )
 	.then(() => ctx._setVolume() )
+	.then(() => ctx._getStatus() ) // for passing back in response
 	.then(() => ctx._sendResponse() )
 	.catch((err) => ctx._sendErrorResponse(err) );
 });
