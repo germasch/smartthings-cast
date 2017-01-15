@@ -117,12 +117,20 @@ Chromecast.prototype._launch = function() {
 	    var onStatus = function(status) {
 		self._setMediaStatus(status);
             };
+	    var onClose = function() {
+		app.removeListener('status', onStatus);
+		app.removeListener('error', onError);
+		self._setMediaStatus(null);
+	    };
 	    var onError = function(err) {
 		console.log("Error: %s", err);
+		app.removeListener('status', onStatus);
+		app.removeListener('close', onClose);
 		reject(err);
 	    };
-	    app.on("error", onError);
 	    app.on("status", onStatus);
+	    app.once('close', onClose);
+	    app.once("error", onError);
 	    self.app = app;
 	    resolve();
 	});
@@ -197,10 +205,24 @@ Chromecast.prototype._join = function(session) {
 	// FIXME? DefaultMediaReceiver is actually too specialized, it could be some other app
 	self.client.join(session, DefaultMediaReceiver, function(err, app) {
 	    if (err) { return reject(err); }
+
 	    var onStatus = function(status) {
 		self._setMediaStatus(status);
             };
-	    app.on('status', onStatus);
+	    var onClose = function() {
+		app.removeListener('status', onStatus);
+		app.removeListener('error', onError);
+		self._setMediaStatus(null);
+	    };
+	    var onError = function(err) {
+		console.log("Error: %s", err);
+		app.removeListener('status', onStatus);
+		app.removeListener('close', onClose);
+		reject(err);
+	    };
+	    app.on("status", onStatus);
+	    app.once('close', onClose);
+	    app.once("error", onError);
 	    self.app = app;
 	    resolve();
 	});
@@ -221,15 +243,43 @@ Chromecast.prototype._getMediaStatus = function() {
     });
 }
 
+Chromecast.prototype._waitForPlayerState = function(playerState) {
+    let self = this;
+    return new Promise(function(resolve, reject) {
+	if (self.mediaStatus.playerState == playerState) {
+	    resolve();
+	}
+	var onTimeout = function () {
+	    reject(new Response(500, "timed out while waiting for playerState"));
+	};
+	var timeout = setTimeout(onTimeout, 5000);
+	var onStatus = function (status) {
+	    if (status.playerState == playerState) {
+		clearTimeout(timeout);
+		self.app.removeListener("status", onStatus);
+		self.app.removeListener("close", onClose);
+		resolve();
+	    } // FIXME, probably should do a timeout, too
+	};
+	var onClose = function() {
+	    self.app.removeListener("status", onStatus);
+	    clearTimeout(timeout);
+	}
+	self.app.on("status", onStatus);
+	self.app.once("close", onClose);
+    });
+}
+
 Chromecast.prototype._pause = function() {
     let self = this;
     return new Promise(function(resolve, reject) {
 	debug("pause")
-	self.app.pause(function (err, result) {
+	self.app.pause(function (err, status) {
 	    if (err) { return reject(err); }
+	    self._setMediaStatus(status);
 	    resolve();
 	});
-    });
+    })
 }
 
 Chromecast.prototype._play = function() {
@@ -247,8 +297,14 @@ Chromecast.prototype._queueUpdate = function() {
     let self = this;
     return new Promise(function(resolve, reject) {
 	debug("queueUpdate", self.options.update);
-	self.app.queueUpdate(self.options.update.items, self.options.update.options,
-			     function (err, result) {
+	// this really happens, at least on GooglePlayMusic -- queueUpdate request does not get
+	// acknowledged (though it's executed).
+	var onTimeout = function () {
+	    reject(new Response(202, "timed out while waiting for queueUpdate"));
+	};
+	var timeout = setTimeout(onTimeout, 5000);
+	self.app.queueUpdate(self.options.update.items, self.options.update.options, function (err, result) {
+	    clearTimeout(timeout);
 	    if (err) { return reject(err); }
 	    resolve();
 	});
@@ -262,7 +318,8 @@ Chromecast.prototype._sendResponse = function() {
     msg.mediaStatus = this.mediaStatus;
     debug("sendResponse:", msg);
     this.res.send(msg);
-    this.client.close();
+    if (this.app) { this.app.close(); }
+    if (this.client) { this.client.close(); }
 }
 
 Chromecast.prototype._sendErrorResponse = function(err) {
@@ -277,9 +334,8 @@ Chromecast.prototype._sendErrorResponse = function(err) {
 	debug("SendErrorResponse:", err);
 	this.res.status(500).send(err + "\n");
     }
-    if (this.client) {
-	this.client.close();
-    }
+    if (this.app) { this.app.close(); }
+    if (this.client) { this.client.close(); }
 }
 
 function attach(ctx) {
@@ -321,17 +377,8 @@ app.post('/playMedia', function (req, res) {
 	.then(() => ctx._connect() )
 	.then(() => ctx._launch() )
 	.then(() => ctx._load() )
-	.then(() => {
-	    return new Promise(function(resolve, reject) {
-		var onStatus = function (status) {
-		    if (status.playerState == "PLAYING") {
-			ctx._sendResponse();
-			resolve();
-		    } // FIXME, probably should do a timeout if we aren't getting "PLAYING"
-		};
-		ctx.app.on("status", onStatus);
-	    });
-	})
+	.then(() => ctx._waitForPlayerState("PLAYING") )
+	.then(() => ctx._sendResponse() )
 	.catch((err) => ctx._sendErrorResponse(err) );
 });
 
@@ -349,6 +396,7 @@ app.post('/pause', function (req, res) {
 
     attach(ctx)
     	.then(() => ctx._pause() )
+	.then(() => ctx._waitForPlayerState("PAUSED") )
 	.then(() => ctx._sendResponse() )
 	.catch((err) => ctx._sendErrorResponse(err) );
 });
@@ -358,6 +406,7 @@ app.post('/play', function (req, res) {
 
     attach(ctx)
     	.then(() => ctx._play() )
+	.then(() => ctx._waitForPlayerState("PLAYING") )
 	.then(() => ctx._sendResponse() )
 	.catch((err) => ctx._sendErrorResponse(err) );
 });
