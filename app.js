@@ -44,7 +44,7 @@ function Response(code, response) {
 // Google Cast
 
 function Chromecast(req, res) {
-    //debug("Request headers: ", req.headers);
+    debug("Request headers: ", req.headers);
     debug("Request body:", req.body);
 
     this.req = req;
@@ -58,6 +58,7 @@ function Chromecast(req, res) {
     this.options.address = { host: body.host };
     
     if (body.port) { this.options.address.port = body.port; }
+    if (body.uuid) { this.options.uuid = body.uuid; }
 }
 
 Chromecast.prototype._setStatus = function(status) {
@@ -313,6 +314,7 @@ Chromecast.prototype._queueUpdate = function() {
 
 Chromecast.prototype._sendResponse = function() {
     var msg = {};
+    msg.uuid = this.options.uuid;
     msg.response = this.response;
     msg.status = this.status;
     msg.mediaStatus = this.mediaStatus;
@@ -325,6 +327,7 @@ Chromecast.prototype._sendResponse = function() {
 Chromecast.prototype._sendErrorResponse = function(err) {
     if (err instanceof Response) {
 	var msg = {};
+	msg.uuid = this.options.uuid;
 	msg.response = err.response;
 	msg.status = this.status;
 	msg.mediaStatus = this.mediaStatus;
