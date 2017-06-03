@@ -5,6 +5,12 @@ GPL-3.0 Licensed by Kai Germaschewski [@germaschewski](https://twitter.com/germa
 ## Overview
 This is a node.js app designed to run in the cloud, serving as an intermediary between a SmartThings device handler and one or more Chromecasts / Google Homes on your home network. It talks to the Chromecast via a websocket on port 8009, which means that you have to make that port remotely reachable by setting up Port Forwarding in your router to each of your chromecasts.
 
+## Prerequisites
+You will need to have nodeJS installed before being able to run this app.
+
+[Click Here](https://howtonode.org/how-to-install-nodejs) for instructions on installing nodeJS.
+
+`https://howtonode.org/how-to-install-nodejs`
 
 ## Quickstart - Local install
 Clone the repository
